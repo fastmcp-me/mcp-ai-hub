@@ -15,12 +15,16 @@ class ModelConfig(BaseModel):
 
     model_name: str
     litellm_params: dict[str, Any]
+    system_prompt: str | None = None  # Optional system prompt for this model
 
 
 class AIHubConfig(BaseModel):
     """Main configuration for AI Hub."""
 
     model_list: list[ModelConfig] = Field(default_factory=list)
+    global_system_prompt: str | None = (
+        None  # Optional global system prompt for all models
+    )
 
     @classmethod
     def get_default_config_path(cls) -> Path:

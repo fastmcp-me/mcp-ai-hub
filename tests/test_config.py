@@ -22,15 +22,26 @@ class TestModelConfig:
         assert config.model_name == "gpt-4"
         assert config.litellm_params["model"] == "openai/gpt-4"
         assert config.litellm_params["api_key"] == "test-key"
+        assert config.system_prompt is None
+
+    def test_model_config_with_system_prompt(self):
+        """Test creating a ModelConfig with system prompt."""
+        config = ModelConfig(
+            model_name="gpt-4",
+            litellm_params={"model": "openai/gpt-4", "api_key": "test-key"},
+            system_prompt="You are a helpful assistant.",
+        )
+        assert config.model_name == "gpt-4"
+        assert config.system_prompt == "You are a helpful assistant."
 
     def test_model_config_validation(self):
         """Test ModelConfig validation."""
         # Missing required field
         with pytest.raises(ValueError):
-            ModelConfig(litellm_params={"model": "openai/gpt-4"})
+            ModelConfig(litellm_params={"model": "openai/gpt-4"}) # type: ignore
 
         with pytest.raises(ValueError):
-            ModelConfig(model_name="gpt-4")
+            ModelConfig(model_name="gpt-4") # type: ignore
 
 
 class TestAIHubConfig:
@@ -45,6 +56,12 @@ class TestAIHubConfig:
         """Test creating empty config."""
         config = AIHubConfig()
         assert config.model_list == []
+        assert config.global_system_prompt is None
+
+    def test_config_with_global_system_prompt(self):
+        """Test creating config with global system prompt."""
+        config = AIHubConfig(global_system_prompt="Global system prompt")
+        assert config.global_system_prompt == "Global system prompt"
 
     def test_config_with_models(self):
         """Test creating config with models."""
@@ -141,6 +158,41 @@ class TestAIHubConfigLoading:
             assert len(config.model_list) == 1
             assert config.model_list[0].model_name == "gpt-4"
             assert config.model_list[0].litellm_params["model"] == "openai/gpt-4"
+        finally:
+            temp_path.unlink()
+
+    def test_load_config_with_system_prompts(self):
+        """Test loading config with system prompts."""
+        config_data = {
+            "global_system_prompt": "Global system prompt",
+            "model_list": [
+                {
+                    "model_name": "gpt-4",
+                    "system_prompt": "Model-specific system prompt",
+                    "litellm_params": {"model": "openai/gpt-4", "api_key": "test-key"},
+                },
+                {
+                    "model_name": "claude-sonnet",
+                    "litellm_params": {
+                        "model": "anthropic/claude-sonnet",
+                        "api_key": "test-key",
+                    },
+                },
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_data, f)
+            temp_path = Path(f.name)
+
+        try:
+            config = AIHubConfig.load_config(temp_path)
+            assert config.global_system_prompt == "Global system prompt"
+            assert len(config.model_list) == 2
+            assert config.model_list[0].model_name == "gpt-4"
+            assert config.model_list[0].system_prompt == "Model-specific system prompt"
+            assert config.model_list[1].model_name == "claude-sonnet"
+            assert config.model_list[1].system_prompt is None
         finally:
             temp_path.unlink()
 

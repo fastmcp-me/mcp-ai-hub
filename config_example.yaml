@@ -10,11 +10,19 @@
 # - NEVER commit this file to version control
 # - Use environment variables or secret management for production
 
+# Global System Prompt (Optional)
+# --------------------------------
+# This system prompt will be applied to ALL models unless overridden by a model-specific prompt.
+# Useful for setting consistent behavior across all AI interactions.
+# Removal tip: Comment out or delete this line to disable global system prompts.
+global_system_prompt: "You are a helpful AI assistant. Be concise and accurate in your responses."
+
 # Model Configuration
 # -------------------
 # Each entry in model_list defines a model you can use with MCP AI Hub
 # The model_name is what you'll use in MCP tools (e.g., chat("gpt-4", "Hello"))
 # The litellm_params configure the actual provider connection
+# Optional: Add system_prompt field to override global system prompt for specific models
 
 model_list:
   # ============================================================================
@@ -22,6 +30,8 @@ model_list:
   # ============================================================================
 
   - model_name: gpt-4o  # Friendly name for MCP tools
+    # Model-specific system prompt (overrides global_system_prompt for this model only)
+    system_prompt: "You are GPT-4o, OpenAI's most advanced multimodal model. You can process text, images, and other inputs."
     litellm_params:
       # LiteLM provider/model identifier (format: provider/model-name)
       model: openai/gpt-4o
@@ -49,6 +59,8 @@ model_list:
   # ============================================================================
 
   - model_name: claude-sonnet  # Claude 3.5 Sonnet - balanced performance
+    # Model-specific system prompt (overrides global_system_prompt for this model only)
+    system_prompt: "You are Claude 3.5 Sonnet, an AI assistant created by Anthropic. You excel at coding, analysis, and creative tasks."
     litellm_params:
       # Full model identifier with version
       model: anthropic/claude-3-5-sonnet-20241022

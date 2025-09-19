@@ -163,6 +163,37 @@ get_model_info(model_name: str) -> dict
 
 MCP AI Hub supports 100+ AI providers through LiteLM. Configure your models in `~/.ai_hub.yaml` with API keys and custom parameters.
 
+### System Prompts
+
+You can define system prompts at two levels:
+
+- `global_system_prompt`: Applied to all models by default
+- Per-model `system_prompt`: Overrides the global prompt for that model
+
+Precedence: model-specific prompt > global prompt. If a model's `system_prompt` is set to an empty string, it disables the global prompt for that model.
+
+```yaml
+global_system_prompt: "You are a helpful AI assistant. Be concise."
+
+model_list:
+  - model_name: gpt-4
+    system_prompt: "You are a precise coding assistant."
+    litellm_params:
+      model: openai/gpt-4
+      api_key: "sk-your-openai-api-key"
+
+  - model_name: claude-sonnet
+    # Empty string disables the global prompt for this model
+    system_prompt: ""
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20241022
+      api_key: "sk-ant-your-anthropic-api-key"
+```
+
+Notes:
+- The server prepends the configured system prompt to the message list it sends to providers.
+- If you pass an explicit message list that already contains a `system` message, both system messages will be included in order (configured prompt first).
+
 ### Supported Providers
 
 **Major AI Providers:**
@@ -189,8 +220,11 @@ MCP AI Hub supports 100+ AI providers through LiteLM. Configure your models in `
 **Basic Configuration:**
 
 ```yaml
+global_system_prompt: "You are a helpful AI assistant. Be concise."
+
 model_list:
   - model_name: gpt-4
+    system_prompt: "You are a precise coding assistant."  # overrides global
     litellm_params:
       model: openai/gpt-4
       api_key: "sk-your-actual-openai-api-key"

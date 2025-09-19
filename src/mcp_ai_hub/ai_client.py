@@ -5,7 +5,7 @@ from typing import Any
 
 import litellm
 
-from .config import AIHubConfig
+from .config import AIHubConfig, ModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,8 @@ class AIClient:
                 f"Available models: {', '.join(available_models)}"
             )
 
-        # Convert input to messages format
-        messages = self._prepare_messages(inputs)
+        # Convert input to messages format and apply system prompt
+        messages = self._prepare_messages(inputs, model_config)
 
         try:
             # Get the model parameter and validate it
@@ -103,13 +103,34 @@ class AIClient:
             ) from e
 
     def _prepare_messages(
-        self, inputs: str | list[dict[str, Any]]
+        self,
+        inputs: str | list[dict[str, Any]],
+        model_config: ModelConfig | None = None,
     ) -> list[dict[str, Any]]:
-        """Convert inputs to OpenAI messages format."""
+        """Convert inputs to OpenAI messages format with system prompt support."""
+        messages: list[dict[str, Any]] = []
+
+        # Determine system prompt with precedence: model-specific > global
+        system_prompt: str | None
+        if model_config is not None and hasattr(model_config, "system_prompt"):
+            # Use model-specific value if explicitly set (including empty string
+            # to intentionally disable/override any global prompt). Only fall back
+            # to global when the model-level value is None (unset).
+            if model_config.system_prompt is not None:
+                system_prompt = model_config.system_prompt
+            else:
+                system_prompt = self.config.global_system_prompt
+        else:
+            system_prompt = self.config.global_system_prompt
+
+        # Add system prompt if configured
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+
         if isinstance(inputs, str):
             # Simple string input
-            return [{"role": "user", "content": inputs}]
-        if isinstance(inputs, list):
+            messages.append({"role": "user", "content": inputs})
+        elif isinstance(inputs, list):
             # Already in messages format, validate structure
             for msg in inputs:
                 if (
@@ -120,10 +141,13 @@ class AIClient:
                     raise ValueError(
                         "Invalid message format. Each message must have 'role' and 'content' keys."
                     )
-            return inputs
-        raise ValueError(
-            "Inputs must be either a string or a list of message dictionaries."
-        )
+            messages.extend(inputs)
+        else:
+            raise ValueError(
+                "Inputs must be either a string or a list of message dictionaries."
+            )
+
+        return messages
 
     def list_models(self) -> list[str]:
         """List all available models."""
@@ -139,4 +163,6 @@ class AIClient:
             "model_name": model_config.model_name,
             "provider_model": model_config.litellm_params.get("model"),
             "configured_params": list(model_config.litellm_params.keys()),
+            "system_prompt": model_config.system_prompt,
+            "global_system_prompt": self.config.global_system_prompt,
         }
