@@ -5,7 +5,7 @@
 # Package identification
 name = "mcp-ai-hub"  # PyPI package name
 version = "0.1.1"  # Package version (follow semantic versioning)
-description = "MCP server for unified AI provider access via LiteLM"  # Short package description
+description = "A Model Context Protocol (MCP) server that provides unified access to various AI providers through LiteLM. Chat with OpenAI, Anthropic, and 100+ other AI models using a single, consistent interface."
 readme = "README.md"  # Long description from README file
 
 # Package authors and maintainers

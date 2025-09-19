@@ -1,5 +1,7 @@
 # MCP AI Hub
 
+[![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/) [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff) [![PyPI Downloads](https://static.pepy.tech/badge/mcp-ai-hub)](https://pepy.tech/projects/mcp-ai-hub)
+
 A Model Context Protocol (MCP) server that provides unified access to various AI providers through LiteLM. Chat with OpenAI, Anthropic, and 100+ other AI models using a single, consistent interface.
 
 ## 🌟 Overview
