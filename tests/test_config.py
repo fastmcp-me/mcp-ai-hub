@@ -38,10 +38,10 @@ class TestModelConfig:
         """Test ModelConfig validation."""
         # Missing required field
         with pytest.raises(ValueError):
-            ModelConfig(litellm_params={"model": "openai/gpt-4"}) # type: ignore
+            ModelConfig(litellm_params={"model": "openai/gpt-4"})  # type: ignore
 
         with pytest.raises(ValueError):
-            ModelConfig(model_name="gpt-4") # type: ignore
+            ModelConfig(model_name="gpt-4")  # type: ignore
 
 
 class TestAIHubConfig:
