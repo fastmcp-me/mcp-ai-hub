@@ -1,9 +1,13 @@
 """LiteLM integration wrapper for AI providers."""
 
+import base64
 import logging
-from typing import Any
+import mimetypes
+from pathlib import Path
+from typing import Any, cast
 
 import litellm
+from litellm.types.utils import ModelResponse
 
 from .config import AIHubConfig, ModelConfig
 
@@ -19,18 +23,37 @@ class AIClient:
         # Set LiteLM to suppress output
         litellm.suppress_debug_info = True
 
-    def chat(self, model_name: str, inputs: str | list[dict[str, Any]]) -> str:
+    def chat(self, model_name: str, messages: list[dict[str, Any]]) -> ModelResponse:
         """Chat with specified AI model.
 
         Args:
             model_name: Name of the model to use
-            inputs: Chat input (string or OpenAI-format messages)
+            messages: List of messages in OpenAI format. Each message should have 'role' and 'content' keys.
+                     Content can be:
+                     - String for text messages
+                     - List of content objects for multimodal messages (text, image_url, etc.)
+
+                     Image formats supported:
+                     - Remote URL: {"url": "https://example.com/image.jpg"}
+                     - Local file path: {"url": "/path/to/local/image.jpg"}
+                     - Base64: {"url": "data:image/jpeg;base64,<base64_string>"}
+
+                     Example formats:
+                     - Text only: [{"role": "user", "content": "Hello!"}]
+                     - With remote image URL: [{"role": "user", "content": [
+                         {"type": "text", "text": "What's in this image?"},
+                         {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}}
+                       ]}]
+                     - With local image path: [{"role": "user", "content": [
+                         {"type": "text", "text": "What's in this image?"},
+                         {"type": "image_url", "image_url": {"url": "/Users/john/Desktop/photo.jpg"}}
+                       ]}]
 
         Returns:
-            AI model response as string
+            Raw LiteLM ModelResponse object containing all response data
 
         Raises:
-            ValueError: If model is not configured
+            ValueError: If model is not configured or messages format is invalid
             Exception: If API call fails
         """
         model_config = self.config.get_model_config(model_name)
@@ -41,8 +64,23 @@ class AIClient:
                 f"Available models: {', '.join(available_models)}"
             )
 
-        # Convert input to messages format and apply system prompt
-        messages = self._prepare_messages(inputs, model_config)
+        # Validate messages format
+        if not isinstance(messages, list):
+            raise ValueError("Messages must be a list of message dictionaries.")
+
+        for msg in messages:
+            if not isinstance(msg, dict) or "role" not in msg or "content" not in msg:
+                raise ValueError(
+                    "Each message must be a dictionary with 'role' and 'content' keys."
+                )
+
+        # Process messages to convert local image paths to base64
+        processed_messages = self._process_messages_for_local_images(messages)
+
+        # Apply system prompt if configured
+        prepared_messages = self._prepare_messages_with_system_prompt(
+            processed_messages, model_config
+        )
 
         try:
             # Get the model parameter and validate it
@@ -59,42 +97,12 @@ class AIClient:
             litellm_params["stream"] = False  # Explicitly disable streaming
 
             response = litellm.completion(
-                model=litellm_model, messages=messages, **litellm_params
+                model=litellm_model, messages=prepared_messages, **litellm_params
             )
 
-            # Extract content from response - LiteLM follows OpenAI format
-            # Using getattr and exception handling for robust access
-            try:
-                # LiteLM response structure: response.choices[0].message.content
-                choices_attr = getattr(response, "choices", None)
-                choices_list: list[Any] = []
-                if isinstance(choices_attr, list | tuple):
-                    choices_list = list(choices_attr)
-                elif isinstance(response, dict):
-                    maybe_choices = response.get("choices")
-                    if isinstance(maybe_choices, list | tuple):
-                        choices_list = list(maybe_choices)
-
-                if choices_list:
-                    first_choice = choices_list[0]
-                    message: Any
-                    if isinstance(first_choice, dict):
-                        message = first_choice.get("message")
-                    else:
-                        message = getattr(first_choice, "message", None)
-
-                    if message:
-                        if isinstance(message, dict):
-                            content = message.get("content")
-                        else:
-                            content = getattr(message, "content", None)
-                        if content:
-                            return str(content)
-
-                return ""
-            except (AttributeError, IndexError, TypeError) as e:
-                logger.warning("Unexpected response format from %s: %s", model_name, e)
-                return ""
+            # Return the raw ModelResponse object
+            # Cast to ModelResponse since LiteLLM can return a union type but we disable streaming
+            return cast(ModelResponse, response)
 
         except Exception as e:
             logger.error("Error calling model %s: %s", model_name, e)
@@ -102,13 +110,139 @@ class AIClient:
                 f"Failed to get response from {model_name}: {str(e)}"
             ) from e
 
-    def _prepare_messages(
+    def _is_local_path(self, url: str) -> bool:
+        """Check if a URL is a local file path.
+
+        Args:
+            url: The URL to check
+
+        Returns:
+            True if the URL is a local file path, False otherwise
+        """
+        # Skip data URLs (base64) and HTTP(S) URLs
+        if url.startswith(("data:", "http://", "https://")):
+            return False
+
+        # Check for absolute paths
+        # Unix/Mac: starts with /
+        # Windows: starts with drive letter (C:, D:, etc.)
+        return url.startswith("/") or (len(url) > 1 and url[1] == ":")
+
+    def _read_and_encode_image(self, file_path: str) -> str | None:
+        """Read a local image file and convert it to base64 data URL.
+
+        Args:
+            file_path: Path to the local image file
+
+        Returns:
+            Base64 data URL string, or None if file cannot be read
+        """
+        try:
+            # Check if file exists
+            path = Path(file_path)
+            if not path.exists():
+                logger.warning(f"Image file not found: {file_path}")
+                return None
+
+            # Determine MIME type
+            mime_type, _ = mimetypes.guess_type(file_path)
+            if mime_type is None:
+                # Default to common image types based on extension
+                ext = path.suffix.lower()
+                mime_types_map = {
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".png": "image/png",
+                    ".gif": "image/gif",
+                    ".webp": "image/webp",
+                    ".bmp": "image/bmp",
+                }
+                mime_type = mime_types_map.get(ext, "image/jpeg")
+
+            # Read and encode the image
+            with open(file_path, "rb") as f:
+                image_data = f.read()
+                base64_str = base64.b64encode(image_data).decode("utf-8")
+
+            # Create data URL
+            data_url = f"data:{mime_type};base64,{base64_str}"
+            logger.info(f"Converted local image to base64: {file_path}")
+            return data_url
+
+        except Exception as e:
+            logger.error(f"Failed to read and encode image {file_path}: {e}")
+            return None
+
+    def _process_content_item(self, item: Any) -> Any:
+        """Process a single content item to convert local image paths.
+
+        Args:
+            item: A content item (dict or other type)
+
+        Returns:
+            Processed content item with local paths converted to base64
+        """
+        # If not a dict, return as-is
+        if not isinstance(item, dict):
+            return item
+
+        # Check if this is an image_url type
+        if item.get("type") == "image_url" and "image_url" in item:
+            image_url_obj = item["image_url"]
+            if isinstance(image_url_obj, dict) and "url" in image_url_obj:
+                url = image_url_obj["url"]
+
+                # Check if it's a local path
+                if self._is_local_path(url):
+                    # Convert to base64
+                    base64_url = self._read_and_encode_image(url)
+                    if base64_url:
+                        # Create a new dict to avoid modifying the original
+                        import copy
+
+                        new_item = copy.deepcopy(item)
+                        new_item["image_url"]["url"] = base64_url
+                        return new_item
+
+        return item
+
+    def _process_messages_for_local_images(
+        self, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Process messages to convert local image paths to base64.
+
+        Args:
+            messages: List of messages to process
+
+        Returns:
+            New list of messages with local images converted to base64
+        """
+        import copy
+
+        processed_messages = []
+
+        for message in messages:
+            # Create a copy to avoid modifying the original
+            new_message = copy.deepcopy(message)
+
+            # Process content if it's a list (multimodal)
+            if isinstance(new_message.get("content"), list):
+                new_content = []
+                for item in new_message["content"]:
+                    new_content.append(self._process_content_item(item))
+                new_message["content"] = new_content
+
+            processed_messages.append(new_message)
+
+        return processed_messages
+
+    def _prepare_messages_with_system_prompt(
         self,
-        inputs: str | list[dict[str, Any]],
+        messages: list[dict[str, Any]],
         model_config: ModelConfig | None = None,
     ) -> list[dict[str, Any]]:
-        """Convert inputs to OpenAI messages format with system prompt support."""
-        messages: list[dict[str, Any]] = []
+        """Add system prompt to messages if configured."""
+        result_messages: list[dict[str, Any]] = []
 
         # Determine system prompt with precedence: model-specific > global
         system_prompt: str | None
@@ -125,29 +259,12 @@ class AIClient:
 
         # Add system prompt if configured
         if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+            result_messages.append({"role": "system", "content": system_prompt})
 
-        if isinstance(inputs, str):
-            # Simple string input
-            messages.append({"role": "user", "content": inputs})
-        elif isinstance(inputs, list):
-            # Already in messages format, validate structure
-            for msg in inputs:
-                if (
-                    not isinstance(msg, dict)
-                    or "role" not in msg
-                    or "content" not in msg
-                ):
-                    raise ValueError(
-                        "Invalid message format. Each message must have 'role' and 'content' keys."
-                    )
-            messages.extend(inputs)
-        else:
-            raise ValueError(
-                "Inputs must be either a string or a list of message dictionaries."
-            )
+        # Add the original messages
+        result_messages.extend(messages)
 
-        return messages
+        return result_messages
 
     def list_models(self) -> list[str]:
         """List all available models."""

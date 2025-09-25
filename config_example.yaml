@@ -38,7 +38,7 @@ model_list:
       # Your actual OpenAI API key - REPLACE THIS!
       api_key: "sk-your-openai-api-key-here"
       # Maximum tokens in response (optional, provider-specific limits apply)
-      max_tokens: 2048
+      max_tokens: 4096
       # Response creativity: 0.0 (deterministic) to 1.0 (creative) (optional)
       temperature: 0.7
       # Additional parameters you can use:
@@ -58,38 +58,32 @@ model_list:
   # ANTHROPIC MODELS
   # ============================================================================
 
-  - model_name: claude-sonnet  # Claude 3.5 Sonnet - balanced performance
+  - model_name: claude-sonnet  # Claude 4 Sonnet - balanced performance
     # Model-specific system prompt (overrides global_system_prompt for this model only)
-    system_prompt: "You are Claude 3.5 Sonnet, an AI assistant created by Anthropic. You excel at coding, analysis, and creative tasks."
+    system_prompt: "You are Claude 4 Sonnet, an AI assistant created by Anthropic. You excel at coding, analysis, and creative tasks."
     litellm_params:
       # Full model identifier with version
-      model: anthropic/claude-3-5-sonnet-20241022
+      model: anthropic/claude-sonnet-4-20250514
       # Your actual Anthropic API key - REPLACE THIS!
       api_key: "sk-ant-your-anthropic-api-key-here"
-      max_tokens: 4096
-      temperature: 0.7
-      # Claude-specific parameters:
-      # top_k: 5  # Top-k sampling (Claude specific)
-      # stop_sequences: ["\n\nHuman:"]  # Claude stop sequences
-
-  - model_name: claude-haiku  # Claude 3 Haiku - fastest, most cost-effective
-    litellm_params:
-      model: anthropic/claude-3-haiku-20240307
-      api_key: "sk-ant-your-anthropic-api-key-here"  # REPLACE WITH YOUR KEY
-      max_tokens: 2048
+      max_tokens: 12000
       temperature: 0.7
 
   # ============================================================================
   # GOOGLE MODELS
   # ============================================================================
-  # Uncomment and configure these sections if you have Google API access
-
-  # - model_name: gemini-2.5-pro
-  #   litellm_params:
-  #     model: gemini/gemini-2.5-pro
-  #     api_key: "your-google-api-key-here"  # REPLACE WITH YOUR KEY
-  #     max_tokens: 2048
-  #     temperature: 0.7
+  - model_name: gemini-2.5-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_key: "your-gemini-api-key"  # REPLACE WITH YOUR KEY
+      max_tokens: 8000
+      temperature: 0.7
+  - model_name: gemini-2.5-flash-image-preview
+    litellm_params:
+      model: gemini/gemini-2.5-flash-image-preview
+      api_key: "your-gemini-api-key"  # REPLACE WITH YOUR KEY
+      max_tokens: 8000
+      temperature: 0.7
 
 
   # ============================================================================

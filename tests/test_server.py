@@ -1,11 +1,17 @@
 """Integration tests for MCP server."""
 
+import base64
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from mcp_ai_hub.config import AIHubConfig, ModelConfig
-from mcp_ai_hub.server import create_mcp_server, initialize_client
+from mcp_ai_hub.server import (
+    create_mcp_server,
+    initialize_client,
+    process_response_for_images,
+)
 
 
 class TestMCPIntegration:
@@ -55,22 +61,190 @@ class TestMCPIntegration:
         """Test chat tool with successful response."""
         mcp = create_mcp_server()
 
-        # Mock the AI client
+        # Mock the AI client and response
+        mock_response = MagicMock()
+        mock_response.model_dump.return_value = {
+            "id": "test-123",
+            "object": "chat.completion",
+            "choices": [{"message": {"role": "assistant", "content": "Test response"}}],
+            "usage": {"total_tokens": 10},
+        }
+
         mock_client = MagicMock()
-        mock_client.chat = MagicMock(return_value="Test response")
+        mock_client.chat = MagicMock(return_value=mock_response)
 
         # Import the server module to patch the global variable
         import mcp_ai_hub.server as server_module
 
         with patch.object(server_module, "ai_client", mock_client):
             # Call the chat tool using call_tool method
-            result = await mcp.call_tool("chat", {"model": "gpt-4", "inputs": "Hello!"})
+            messages = [{"role": "user", "content": "Hello!"}]
+            result = await mcp.call_tool(
+                "chat", {"model": "gpt-4", "messages": messages}
+            )
 
             # The result should be a tuple of (content, metadata)
             content, metadata = result
             assert len(content) == 1
-            assert content[0].text == "Test response"
-            mock_client.chat.assert_called_once_with("gpt-4", "Hello!")
+            # The response should be the processed dictionary
+            import json
+
+            response_dict = json.loads(content[0].text)
+            assert response_dict["id"] == "test-123"
+            assert response_dict["choices"][0]["message"]["content"] == "Test response"
+            mock_client.chat.assert_called_once_with("gpt-4", messages)
+
+    @pytest.mark.asyncio
+    async def test_chat_tool_with_image_path(self, tmp_path):
+        """Chat tool creates target image directory when requested."""
+        mcp = create_mcp_server()
+
+        mock_response = MagicMock()
+        mock_response.model_dump.return_value = {
+            "id": "test-456",
+            "object": "chat.completion",
+            "choices": [{"message": {"role": "assistant", "content": "Test response"}}],
+            "usage": {"total_tokens": 5},
+        }
+
+        mock_client = MagicMock()
+        mock_client.chat = MagicMock(return_value=mock_response)
+
+        import mcp_ai_hub.server as server_module
+
+        target_dir = tmp_path / "saved_images"
+        assert not target_dir.exists()
+
+        with patch.object(server_module, "ai_client", mock_client):
+            messages = [{"role": "user", "content": "Hello!"}]
+            result = await mcp.call_tool(
+                "chat",
+                {
+                    "model": "gpt-4",
+                    "messages": messages,
+                    "image_path": str(target_dir),
+                },
+            )
+
+            content, _ = result
+            import json
+
+            response_dict = json.loads(content[0].text)
+            assert response_dict["id"] == "test-456"
+            mock_client.chat.assert_called_once_with("gpt-4", messages)
+
+        assert target_dir.exists()
+        assert target_dir.is_dir()
+
+    @pytest.mark.asyncio
+    async def test_chat_tool_with_invalid_image_path(self, tmp_path):
+        """Chat tool rejects image_path pointing to a file."""
+        mcp = create_mcp_server()
+
+        mock_response = MagicMock()
+        mock_response.model_dump.return_value = {
+            "id": "test-789",
+            "object": "chat.completion",
+            "choices": [{"message": {"role": "assistant", "content": "Test"}}],
+            "usage": {"total_tokens": 3},
+        }
+
+        mock_client = MagicMock()
+        mock_client.chat = MagicMock(return_value=mock_response)
+
+        import mcp_ai_hub.server as server_module
+
+        with patch.object(server_module, "ai_client", mock_client):
+            messages = [{"role": "user", "content": "Hello!"}]
+            file_path = tmp_path / "not_a_directory.txt"
+            file_path.write_text("hello")
+
+            with pytest.raises(Exception) as exc_info:
+                await mcp.call_tool(
+                    "chat",
+                    {
+                        "model": "gpt-4",
+                        "messages": messages,
+                        "image_path": str(file_path),
+                    },
+                )
+
+        assert "image_path must be a directory" in str(exc_info.value)
+
+    def test_process_response_for_images_with_multimodal_list(self):
+        """Process image blocks inside list-based content responses."""
+        image_bytes = b"fake image data"
+        base64_data = base64.b64encode(image_bytes).decode()
+        data_url = f"data:image/png;base64,{base64_data}"
+
+        response_dict = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "Here is the result."},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ],
+                    }
+                }
+            ]
+        }
+
+        processed = process_response_for_images(response_dict)
+
+        processed_choice = processed["choices"][0]
+        original_choice = response_dict["choices"][0]
+        # Confirm original response remains unchanged
+        assert original_choice["message"]["content"][1]["image_url"]["url"] == data_url
+
+        image_path_str = processed_choice["message"]["content"][1]["image_url"]["url"]
+        temp_path = Path(image_path_str)
+        try:
+            assert image_path_str != data_url
+            assert temp_path.exists()
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+        # Text content should remain unchanged
+        assert (
+            processed_choice["message"]["content"][0]["text"] == "Here is the result."
+        )
+
+    def test_process_response_for_images_with_custom_directory(self, tmp_path):
+        """Images are written to the provided directory when specified."""
+        image_bytes = b"fake image data"
+        base64_data = base64.b64encode(image_bytes).decode()
+        data_url = f"data:image/png;base64,{base64_data}"
+
+        response_dict = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "Here is the result."},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ],
+                    }
+                }
+            ]
+        }
+
+        target_dir = tmp_path / "images"
+        processed = process_response_for_images(response_dict, target_dir)
+
+        processed_choice = processed["choices"][0]
+        saved_path = Path(processed_choice["message"]["content"][1]["image_url"]["url"])
+
+        try:
+            assert saved_path.parent == target_dir
+            assert saved_path.exists()
+            assert target_dir.exists()
+        finally:
+            if saved_path.exists():
+                saved_path.unlink()
 
     @pytest.mark.asyncio
     async def test_chat_tool_not_initialized(self):
@@ -83,7 +257,8 @@ class TestMCPIntegration:
         with patch.object(server_module, "ai_client", None):
             # Call the chat tool should raise error (wrapped in ToolError)
             with pytest.raises(Exception) as exc_info:
-                await mcp.call_tool("chat", {"model": "gpt-4", "inputs": "Hello!"})
+                messages = [{"role": "user", "content": "Hello!"}]
+                await mcp.call_tool("chat", {"model": "gpt-4", "messages": messages})
             assert "AI client not initialized" in str(exc_info.value)
 
     @pytest.mark.asyncio
@@ -286,10 +461,11 @@ class TestErrorHandling:
 
         with (
             patch.object(server_module, "ai_client", mock_client),
-            pytest.raises(Exception, match="API Error"),
+            pytest.raises(Exception, match="Error executing tool chat"),
         ):
             # The error should be raised when calling the tool
-            await mcp.call_tool("chat", {"model": "gpt-4", "inputs": "Hello!"})
+            messages = [{"role": "user", "content": "Hello!"}]
+            await mcp.call_tool("chat", {"model": "gpt-4", "messages": messages})
 
     @pytest.mark.asyncio
     async def test_get_model_info_tool_error_handling(self):

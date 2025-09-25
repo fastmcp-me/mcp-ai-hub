@@ -40,7 +40,7 @@ class TestAIClient:
         assert self.client.config == self.config
 
     def test_chat_with_string_input(self):
-        """Test chat with string input."""
+        """Test chat with message list input."""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock(message=MagicMock(content="Test response"))]
 
@@ -48,12 +48,13 @@ class TestAIClient:
             "mcp_ai_hub.ai_client.litellm.completion",
             return_value=mock_response,
         ) as mock_completion:
-            response = self.client.chat("gpt-4", "Hello, world!")
+            messages = [{"role": "user", "content": "Hello, world!"}]
+            response = self.client.chat("gpt-4", messages)
 
-            assert response == "Test response"
+            assert response == mock_response
             mock_completion.assert_called_once_with(
                 model="openai/gpt-4",
-                messages=[{"role": "user", "content": "Hello, world!"}],
+                messages=messages,
                 api_key="test-key",
                 max_tokens=2048,
                 temperature=0.7,
@@ -80,9 +81,10 @@ class TestAIClient:
             "mcp_ai_hub.ai_client.litellm.completion",
             return_value=mock_response,
         ) as mock_completion:
-            response = client.chat("gpt-4", "Hello, world!")
+            messages = [{"role": "user", "content": "Hello, world!"}]
+            response = client.chat("gpt-4", messages)
 
-            assert response == "Test response"
+            assert response == mock_response
             mock_completion.assert_called_once_with(
                 model="openai/gpt-4",
                 messages=[
@@ -114,9 +116,10 @@ class TestAIClient:
             "mcp_ai_hub.ai_client.litellm.completion",
             return_value=mock_response,
         ) as mock_completion:
-            response = client.chat("gpt-4", "Hello, world!")
+            messages = [{"role": "user", "content": "Hello, world!"}]
+            response = client.chat("gpt-4", messages)
 
-            assert response == "Test response"
+            assert response == mock_response
             mock_completion.assert_called_once_with(
                 model="openai/gpt-4",
                 messages=[
@@ -143,7 +146,7 @@ class TestAIClient:
         ) as mock_completion:
             response = self.client.chat("gpt-4", messages)
 
-            assert response == "Test response"
+            assert response == mock_response
             mock_completion.assert_called_once_with(
                 model="openai/gpt-4",
                 messages=messages,
@@ -158,7 +161,7 @@ class TestAIClient:
         with pytest.raises(
             ValueError, match="Model 'non-existing' not found in configuration"
         ):
-            self.client.chat("non-existing", "Hello!")
+            self.client.chat("non-existing", [{"role": "user", "content": "Hello!"}])
 
     def test_chat_missing_model_parameter(self):
         """Test chat with model config missing model parameter."""
@@ -173,7 +176,7 @@ class TestAIClient:
         client = AIClient(config)
 
         with pytest.raises(RuntimeError, match="Failed to get response from bad-model"):
-            client.chat("bad-model", "Hello!")
+            client.chat("bad-model", [{"role": "user", "content": "Hello!"}])
 
     def test_chat_api_error(self):
         """Test chat when API call fails."""
@@ -184,7 +187,7 @@ class TestAIClient:
             ),
             pytest.raises(RuntimeError, match="Failed to get response from gpt-4"),
         ):
-            self.client.chat("gpt-4", "Hello!")
+            self.client.chat("gpt-4", [{"role": "user", "content": "Hello!"}])
 
     def test_chat_empty_response(self):
         """Test chat with empty response."""
@@ -195,8 +198,10 @@ class TestAIClient:
             "mcp_ai_hub.ai_client.litellm.completion",
             return_value=mock_response,
         ):
-            response = self.client.chat("gpt-4", "Hello!")
-            assert response == ""
+            response = self.client.chat(
+                "gpt-4", [{"role": "user", "content": "Hello!"}]
+            )
+            assert response == mock_response
 
     def test_chat_missing_content(self):
         """Test chat with response missing content."""
@@ -209,49 +214,29 @@ class TestAIClient:
             "mcp_ai_hub.ai_client.litellm.completion",
             return_value=mock_response,
         ):
-            response = self.client.chat("gpt-4", "Hello!")
-            assert response == ""
+            response = self.client.chat(
+                "gpt-4", [{"role": "user", "content": "Hello!"}]
+            )
+            assert response == mock_response
 
-    def test_prepare_messages_string_input(self):
-        """Test preparing messages from string input."""
-        messages = self.client._prepare_messages("Hello, world!")
-        assert messages == [{"role": "user", "content": "Hello, world!"}]
-
-    def test_prepare_messages_with_global_system_prompt(self):
-        """Test preparing messages with global system prompt."""
+    def test_prepare_messages_with_system_prompt(self):
+        """Test preparing messages with system prompt."""
         config = AIHubConfig(
             global_system_prompt="Global system prompt",
             model_list=[
                 ModelConfig(
                     model_name="gpt-4",
-                    litellm_params={"model": "openai/gpt-4", "api_key": "test-key"},
-                )
-            ],
-        )
-        client = AIClient(config)
-        messages = client._prepare_messages("Hello, world!")
-        assert messages == [
-            {"role": "system", "content": "Global system prompt"},
-            {"role": "user", "content": "Hello, world!"},
-        ]
-
-    def test_prepare_messages_with_model_specific_system_prompt(self):
-        """Test preparing messages with model-specific system prompt (overrides global)."""
-        config = AIHubConfig(
-            global_system_prompt="Global system prompt",
-            model_list=[
-                ModelConfig(
-                    model_name="gpt-4",
-                    system_prompt="Model-specific system prompt",
                     litellm_params={"model": "openai/gpt-4", "api_key": "test-key"},
                 )
             ],
         )
         client = AIClient(config)
         model_config = config.get_model_config("gpt-4")
-        messages = client._prepare_messages("Hello, world!", model_config)
-        assert messages == [
-            {"role": "system", "content": "Model-specific system prompt"},
+        messages = [{"role": "user", "content": "Hello, world!"}]
+
+        prepared = client._prepare_messages_with_system_prompt(messages, model_config)
+        assert prepared == [
+            {"role": "system", "content": "Global system prompt"},
             {"role": "user", "content": "Hello, world!"},
         ]
 
@@ -275,49 +260,43 @@ class TestAIClient:
             ],
         )
         client = AIClient(config)
+        messages = [{"role": "user", "content": "Hello, world!"}]
 
         # Test model with specific system prompt
         gpt4_config = config.get_model_config("gpt-4")
-        messages = client._prepare_messages("Hello, world!", gpt4_config)
-        assert messages == [
+        prepared = client._prepare_messages_with_system_prompt(messages, gpt4_config)
+        assert prepared == [
             {"role": "system", "content": "Model-specific system prompt"},
             {"role": "user", "content": "Hello, world!"},
         ]
 
         # Test model without specific system prompt (should use global)
         claude_config = config.get_model_config("claude-sonnet")
-        messages = client._prepare_messages("Hello, world!", claude_config)
-        assert messages == [
+        prepared = client._prepare_messages_with_system_prompt(messages, claude_config)
+        assert prepared == [
             {"role": "system", "content": "Global system prompt"},
             {"role": "user", "content": "Hello, world!"},
         ]
 
-    def test_prepare_messages_valid_list_input(self):
-        """Test preparing messages from valid list input."""
-        input_messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": "Hello!"},
-        ]
-        messages = self.client._prepare_messages(input_messages)
-        assert messages == input_messages
+    def test_messages_validation_invalid_format(self):
+        """Test messages validation with invalid format."""
+        with pytest.raises(
+            ValueError, match="Messages must be a list of message dictionaries"
+        ):
+            self.client.chat("gpt-4", "string_instead_of_list")  # type: ignore
 
-    def test_prepare_messages_invalid_list_input(self):
-        """Test preparing messages from invalid list input."""
+    def test_messages_validation_missing_keys(self):
+        """Test messages validation with missing keys."""
         invalid_messages = [
             {"role": "system", "content": "You are a helpful assistant."},
             {"invalid": "message"},  # Missing role and content
         ]
 
-        with pytest.raises(ValueError, match="Invalid message format"):
-            self.client._prepare_messages(invalid_messages)
-
-    def test_prepare_messages_invalid_input_type(self):
-        """Test preparing messages from invalid input type."""
         with pytest.raises(
             ValueError,
-            match="Inputs must be either a string or a list of message dictionaries",
+            match="Each message must be a dictionary with 'role' and 'content' keys",
         ):
-            self.client._prepare_messages(123)  # type: ignore # Invalid type
+            self.client.chat("gpt-4", invalid_messages)
 
     def test_list_models(self):
         """Test listing available models."""
@@ -385,6 +364,7 @@ class TestAIClient:
         model_cfg = config.get_model_config("gpt-4")
         assert model_cfg is not None
 
-        # _prepare_messages should NOT include a system message
-        messages = client._prepare_messages("Hello!", model_cfg)
-        assert messages == [{"role": "user", "content": "Hello!"}]
+        # _prepare_messages_with_system_prompt should NOT include a system message
+        messages = [{"role": "user", "content": "Hello!"}]
+        prepared = client._prepare_messages_with_system_prompt(messages, model_cfg)
+        assert prepared == [{"role": "user", "content": "Hello!"}]
